@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test-python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: pip install sentence-transformers numpy
+      - name: Run tests
+        run: python python/test_suite.py --tags embed,memory,api,storage,threading
+
+  test-cpp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ unixodbc-dev
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . -j$(nproc)
+      - name: Run C++ tests
+        run: |
+          cd build
+          ./test_vector_ops
+          ./test_hopfield
+          ./test_graph
+
+  benchmark:
+    runs-on: ubuntu-latest
+    needs: [test-python, test-cpp]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake g++ unixodbc-dev
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . -j$(nproc)
+      - name: Run benchmarks
+        run: cd build && ./bench_vector_ops

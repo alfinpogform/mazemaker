@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""
+access_logger.py - Records every recall event for LSTM training data.
+
+Provides:
+- Circular buffer of recent access events
+- JSON Lines persistence for training data generation
+- Co-occurrence analysis for graph edge strengthening
+- LSTM training pair extraction
+"""
+
+import json
+import os
+import time
+import threading
+import itertools
+from collections import defaultdict, deque
+from pathlib import Path
+from typing import Optional
+
+
+class AccessLogger:
+    """Logs memory recall events for temporal pattern learning.
+
+    Usage:
+        logger = AccessLogger.instance()
+        logger.log_recall(
+            query_embedding=[0.1, 0.2, ...],
+            result_ids=[42, 17, 88],
+            result_scores=[0.95, 0.87, 0.72],
+            timestamp=time.time()
+        )
+        sequence = logger.get_sequence(20)
+        pair = logger.get_training_pair()
+    """
+
+    _instance = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def instance(cls, log_dir: str = "~/.mazemaker/engine/access_logs",
+                 max_sequence: int = 20) -> "AccessLogger":
+        """Singleton accessor. Creates on first call.
+
+        Subsequent calls with different parameters silently kept the
+        first call's config — operators changing log_dir mid-process
+        were puzzled when nothing moved. Now warns on mismatch.
+        """
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls(log_dir=log_dir, max_sequence=max_sequence)
+                    return cls._instance
+        inst = cls._instance
+        if (str(inst._log_dir) != str(Path(os.path.expanduser(log_dir)))
+                or inst._max_sequence != max_sequence):
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "AccessLogger.instance() called with parameters that differ "
+                "from the existing singleton (log_dir=%s, max_sequence=%s) — "
+                "keeping the first-call values (log_dir=%s, max_sequence=%s).",
+                log_dir, max_sequence, inst._log_dir, inst._max_sequence,
+            )
+        return inst
+
+    def __init__(self, log_dir: str = "~/.mazemaker/engine/access_logs",
+                 max_sequence: int = 20):
+        self._log_dir = Path(os.path.expanduser(log_dir))
+        self._max_sequence = max_sequence
+        # Buffer max-size now honours max_sequence (scaled). Previously a
+        # caller passing max_sequence=2000 still got a hardcoded 1000-
+        # event buffer — the parameter was a lie.
+        self._buffer: deque[dict] = deque(maxlen=max(1000, max_sequence * 50))
+        self._flush_threshold = 100
+        self._ops_since_flush = 0
+        # _file_lock guards in-memory state (_buffer, _ops_since_flush). It is
+        # held only briefly to append/snapshot/reset; never during file I/O.
+        # _write_lock serializes the actual disk writes (open/append/rotate/
+        # cleanup) so the buffer-side hot path stays uncontended even when a
+        # flush is in progress. Previously _flush_buffer held _file_lock for
+        # the full open/write/rotate window, blocking every log_recall and
+        # get_sequence call on whoever was reading or writing the JSONL file.
+        self._file_lock = threading.Lock()
+        self._write_lock = threading.Lock()
+        # Throttle directory-scanning cleanup so it doesn't run on every flush
+        # (every 100 events). Stat'ing the dir + iterating files is wasted I/O
+        # at burst rates; an hour between sweeps is plenty for a 30-day cap.
+        self._last_cleanup_at = 0.0
+        self._cleanup_interval_s = 3600
+
+        # Auto-create log directory
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._log_file = self._log_dir / "access_log.jsonl"
+
+    def log_recall(self, query_embedding: list[float], result_ids: list[int],
+                   result_scores: list[float], timestamp: Optional[float] = None):
+        """Record a single recall event.
+
+        Two storage tiers for the query embedding:
+
+          - in-memory event 'query_emb' keeps the FULL vector. This is what
+            consumers like _enhance_recall and the LSTM read via get_sequence;
+            they need the full dim to feed the LSTMPredictor that was sized
+            against the model's full embedding dim. Previously this was
+            truncated to 64 dims at log time to keep logs compact, which
+            silently broke the LSTM path with a ValueError that the
+            recall-side try/except swallowed — the LSTM enhancement never
+            actually ran.
+          - on-disk JSONL line keeps only the truncated 64-d sample, so log
+            files stay compact (the truncation happens inside _flush_buffer
+            via __log_event_for_disk). The disk log is for forensic /
+            ML-training use, not the live LSTM context.
+        """
+        if timestamp is None:
+            timestamp = time.time()
+
+        event = {
+            "ts": timestamp,
+            "query_emb": list(query_embedding),  # full-dim, in-memory only
+            "result_ids": result_ids[:20],  # cap at 20 results
+            "result_scores": [round(s, 4) for s in result_scores[:20]],
+            "n_results": len(result_ids),
+        }
+
+        should_flush = False
+        with self._file_lock:
+            self._buffer.append(event)
+            self._ops_since_flush += 1
+
+            # Periodic disk flush — fire OUTSIDE the buffer lock so the slow
+            # path (open/write/rotate/cleanup) doesn't block readers and
+            # other writers. Without this, a hot recall workload stalls on
+            # disk I/O every 100 events.
+            if self._ops_since_flush >= self._flush_threshold:
+                should_flush = True
+
+        if should_flush:
+            self._flush_buffer()
+
+    def get_sequence(self, n: int = 20) -> list[dict]:
+        """Return last N recall events (most recent last).
+
+        Args:
+            n: Number of events to return.
+        Returns:
+            List of event dicts in chronological order.
+        """
+        with self._file_lock:
+            # deque doesn't support slicing; use islice to get last n items
+            start = max(0, len(self._buffer) - n)
+            return list(itertools.islice(self._buffer, start, None))
+
+    def get_co_occurrence_pairs(self, min_count: int = 3) -> list[tuple[int, int, int]]:
+        """Find memory pairs frequently recalled together.
+
+        Scans buffer for result IDs appearing together in the same recall event.
+        Useful for strengthening graph edges between co-accessed memories.
+
+        Args:
+            min_count: Minimum co-occurrence threshold.
+        Returns:
+            List of (id_a, id_b, count) tuples sorted by count descending.
+            id_a < id_b to avoid duplicates.
+        """
+        pair_counts: dict[tuple[int, int], int] = defaultdict(int)
+
+        with self._file_lock:
+            for event in self._buffer:
+                ids = sorted(set(event.get("result_ids", [])))
+                # Count all pairs from this event
+                for i in range(len(ids)):
+                    for j in range(i + 1, len(ids)):
+                        pair_counts[(ids[i], ids[j])] += 1
+
+        # Filter and sort
+        results = [(a, b, c) for (a, b), c in pair_counts.items() if c >= min_count]
+        results.sort(key=lambda x: -x[2])
+        return results
+
+    def save(self):
+        """Persist current buffer to disk (append to JSONL file)."""
+        self._flush_buffer()
+
+    def load(self, n: int = 1000):
+        """Load last N events from disk into buffer.
+
+        Args:
+            n: Maximum events to load.
+
+        Restored from a no-op state: the previous body read events from
+        the JSONL log into a local `events` list and then replaced the
+        buffer with a re-slice of self._buffer (i.e. its existing
+        in-memory contents), silently discarding everything the disk
+        read just produced. Warm-starting an AccessLogger instance
+        therefore got an empty buffer even though access_log.jsonl
+        had thousands of usable events.
+        """
+        if not self._log_file.exists():
+            return
+
+        events = []
+        try:
+            with open(self._log_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except IOError:
+            return
+
+        # Take the last N events (oldest dropped) so the buffer reflects
+        # recent activity. The events list is in chronological order
+        # (file is appended), so slicing from the tail keeps the latest.
+        if not events:
+            return
+        tail = events[-n:] if n and n < len(events) else events
+        with self._file_lock:
+            self._buffer = deque(tail, maxlen=1000)
+            self._ops_since_flush = 0
+
+    def get_training_pair(self, max_seq: int = 20) -> Optional[tuple[list[list[float]], list[float]]]:
+        """Extract one LSTM training sample from recent access history.
+
+        Returns a (sequence_embeddings, target_embedding) pair where:
+        - sequence: last max_seq-1 query embeddings
+        - target: the query embedding of the most recent event
+
+        If not enough events, returns None.
+
+        Args:
+            max_seq: Minimum events needed.
+        Returns:
+            (sequence, target) or None if insufficient data.
+        """
+        with self._file_lock:
+            # collections.deque does not support negative-index slicing —
+            # `self._buffer[-max_seq:]` raises TypeError. Use itertools.islice
+            # to take the last `max_seq` items in O(n) but never crash.
+            start = max(0, len(self._buffer) - max_seq)
+            events = list(itertools.islice(self._buffer, start, None))
+
+        if len(events) < 2:
+            return None
+
+        # Build sequence from all but last, target from last
+        sequence = [e["query_emb"] for e in events[:-1]]
+        target = events[-1]["query_emb"]
+
+        return (sequence, target)
+
+    def get_training_batch(self, batch_size: int = 32,
+                           max_seq: int = 20) -> Optional[list[tuple[list[list[float]], list[float]]]]:
+        """Extract multiple LSTM training pairs.
+
+        Slides a window across the buffer to generate training samples.
+        Returns None if insufficient data.
+
+        Args:
+            batch_size: Number of samples to generate.
+            max_seq: Sequence length per sample.
+        Returns:
+            List of (sequence, target) pairs, or None.
+        """
+        with self._file_lock:
+            events = list(self._buffer)
+
+        if len(events) < max_seq + 1:
+            return None
+
+        pairs = []
+        # Slide window backwards from most recent
+        for i in range(len(events) - 1, max_seq - 1, -1):
+            if len(pairs) >= batch_size:
+                break
+            seq = [events[j]["query_emb"] for j in range(i - max_seq + 1, i)]
+            target = events[i]["query_emb"]
+            pairs.append((seq, target))
+
+        return pairs if pairs else None
+
+    def flush(self):
+        """Force flush buffer to disk."""
+        self._flush_buffer()
+
+    # Log rotation config
+    MAX_LOG_SIZE_MB = 100
+    MAX_ROTATED_FILES = 5
+
+    def _should_rotate(self) -> bool:
+        """Check if current log file exceeds size threshold."""
+        if not self._log_file.exists():
+            return False
+        try:
+            size_mb = self._log_file.stat().st_size / (1024 * 1024)
+            return size_mb >= self.MAX_LOG_SIZE_MB
+        except OSError:
+            return False
+
+    def _rotate_log(self):
+        """Rotate log files: access_log.jsonl → access_log.1.jsonl, etc."""
+        if not self._log_file.exists():
+            return
+        # Delete oldest if at cap
+        oldest = self._log_dir / f"access_log.{self.MAX_ROTATED_FILES}.jsonl"
+        if oldest.exists():
+            oldest.unlink()
+        # Shift others down
+        for i in range(self.MAX_ROTATED_FILES - 1, 0, -1):
+            src = self._log_dir / f"access_log.{i}.jsonl"
+            dst = self._log_dir / f"access_log.{i + 1}.jsonl"
+            if src.exists():
+                src.rename(dst)
+        # Rename current to .1
+        dst = self._log_dir / "access_log.1.jsonl"
+        self._log_file.rename(dst)
+
+    def _clean_old_logs(self, keep_days: int = 30):
+        """Delete rotated log files older than keep_days.
+
+        Only ROTATED files (access_log.<N>.jsonl with numeric suffix) are
+        considered — the active access_log.jsonl is excluded to prevent the
+        active inode from being unlinked underneath the writer when a process
+        has been alive but quiet for 30+ days. Active mtime updates on every
+        write, so in practice it would survive anyway, but matching the
+        pattern was a latent foot-gun.
+        """
+        if not self._log_dir.exists():
+            return
+        cutoff = time.time() - (keep_days * 86400)
+        active_name = self._log_file.name
+        for f in self._log_dir.iterdir():
+            if not f.is_file():
+                continue
+            if f.name == active_name:
+                continue  # never touch the live log
+            if f.suffix != ".jsonl" or not f.name.startswith("access_log."):
+                continue
+            # Require an integer rotation index between the prefix and the
+            # extension (access_log.<int>.jsonl). Anything else (e.g. a
+            # third-party file that happens to share the prefix) is left alone.
+            stem_parts = f.name[len("access_log."):-len(".jsonl")]
+            if not stem_parts.isdigit():
+                continue
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except OSError:
+                pass
+
+    @staticmethod
+    def _event_for_disk(event: dict) -> dict:
+        """Truncate query_emb to 64 dims for the on-disk JSONL form.
+
+        Disk records are for forensic / training use and don't need the
+        full embedding; truncating keeps file size sane. The in-memory
+        deque retains the full vector for live LSTM consumption.
+        """
+        emb = event.get("query_emb") or []
+        if len(emb) > 64:
+            return {**event, "query_emb": list(emb[:64])}
+        return event
+
+    def _flush_buffer(self):
+        """Write buffered events to JSONL file.
+
+        Two-phase: snapshot under _file_lock (fast), then do the disk I/O
+        under _write_lock (slow but no longer blocks readers/writers of the
+        in-memory buffer). Previously the entire open/append/rotate ran
+        under _file_lock, so every log_recall, get_sequence, and
+        co-occurrence query stalled for the duration of the write.
+        """
+        # Phase 1 — snapshot. Hold _file_lock just long enough to slice
+        # the buffer and reset the counter. ALWAYS reset before the write
+        # attempt: if reset only on success, an IOError leaks the counter
+        # and every subsequent log_recall re-fires _flush_buffer and spams
+        # \"[AccessLogger] Flush error\" to stderr per event.
+        with self._file_lock:
+            if not self._buffer:
+                self._ops_since_flush = 0
+                return
+            events_to_flush_count = self._ops_since_flush
+            self._ops_since_flush = 0
+            start = max(0, len(self._buffer) - events_to_flush_count)
+            events_snapshot = [
+                self._event_for_disk(e)
+                for e in itertools.islice(self._buffer, start, None)
+            ]
+
+        if not events_snapshot:
+            return
+
+        # Phase 2 — file I/O. _write_lock serializes concurrent flushers so
+        # the JSONL stays append-coherent and rotation isn't racy, but the
+        # buffer-side hot path is now free to run in parallel.
+        with self._write_lock:
+            try:
+                if self._should_rotate():
+                    self._rotate_log()
+
+                # Clean old rotated logs at most once per hour (cheap on its
+                # own but we'd otherwise iterdir+stat every 100 recalls).
+                now = time.time()
+                if now - self._last_cleanup_at >= self._cleanup_interval_s:
+                    self._clean_old_logs(keep_days=30)
+                    self._last_cleanup_at = now
+
+                with open(self._log_file, "a") as f:
+                    for event in events_snapshot:
+                        f.write(json.dumps(event, separators=(",", ":")) + "\n")
+            except IOError as e:
+                # One line, then suppressed until next flush window — operator
+                # sees the failure once instead of per-event. Use the logger
+                # so this lands in the same sink as the rest of the engine,
+                # not raw stdout.
+                import logging as _logging
+                _logging.getLogger(__name__).error("AccessLogger flush error: %s", e)
+
+    def __len__(self):
+        return len(self._buffer)
+
+    def __repr__(self):
+        return f"AccessLogger(events={len(self._buffer)}, log_dir={self._log_dir})"
+
+
+if __name__ == "__main__":
+    # Quick smoke test
+    import random
+
+    logger = AccessLogger(log_dir="/tmp/test_access_logs")
+    print(f"Created: {logger}")
+
+    # Simulate some recalls
+    for i in range(50):
+        emb = [random.uniform(-1, 1) for _ in range(1024)]
+        ids = random.sample(range(1000), k=random.randint(3, 10))
+        scores = [random.uniform(0.5, 1.0) for _ in ids]
+        logger.log_recall(emb, ids, scores)
+
+    print(f"After 50 recalls: {logger}")
+    seq = logger.get_sequence(5)
+    print(f"Last 5 events: {len(seq)} events")
+    print(f"First event keys: {list(seq[0].keys())}")
+
+    pairs = logger.get_co_occurrence_pairs(min_count=2)
+    print(f"Co-occurrence pairs (min=2): {len(pairs)}")
+    if pairs:
+        print(f"  Top pair: {pairs[0]}")
+
+    pair = logger.get_training_pair()
+    if pair:
+        seq_emb, target = pair
+        print(f"Training pair: sequence len={len(seq_emb)}, target len={len(target)}")
+
+    # Test singleton
+    logger2 = AccessLogger.instance(log_dir="/tmp/test_access_logs")
+    print(f"Singleton same? {logger is logger2}")
+
+    # Cleanup
+    import shutil
+    shutil.rmtree("/tmp/test_access_logs", ignore_errors=True)
+    print("AccessLogger: OK")

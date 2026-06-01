@@ -1,0 +1,47 @@
+build/
+__pycache__/
+*.pyc
+*.so
+*.o
+*.a
+*.pkl
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+.mazemaker/engine/
+*.db
+.env
+build_debug/
+tools/dashboard/.certs/
+*.bak
+sqlite-wal
+sqlite-shm
+sqlite
+CLAUDE.md
+tools/dashboard/.lib_cache/
+
+# Claude Code per-user local overrides (this file is gitignored on purpose)
+.claude/settings.local.json
+docs/BENCHMARK_DOMINANCE_PLAN.md
+docs/DAE_DESIGN.md
+docs/RESEARCH_FRONTIER.md
+docs/SOTA_LANDSCAPE.md
+
+# Benchmark artifacts: harness ships, but the LongMemEval-S dataset
+# (~265 MB) and intermediate run artefacts do not.
+benchmarks/external/data/
+benchmarks/external/logs/
+benchmarks/external/.demolition-venv/
+benchmarks/track_a_*.log
+.wrangler/
+snapshots/
+smoke/
+probing_eval/
+external/benchmarks/logs/
+
+# Operator-internal architecture notes (personal scratchpad; not for
+# git). The engine code and benchmark code referenced inside it ARE
+# committed to this repo as of 2026-05-18.
+docs/PROPRIETARY_STACK_INTERNAL.md
+

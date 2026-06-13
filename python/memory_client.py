@@ -3078,14 +3078,18 @@ class Mazemaker:
             return [] if fuse else []
 
         per_q = k_per_query if k_per_query is not None else k * 2
-        # Use FULL recall() pipeline per query (ColBERT + DAE + hybrid + rerank).
-        # recall_batch() is the REM fast-path — pure-semantic cosine matmul,
-        # not suitable for quality multi-perspective fusion.
+        # Per angle, use recall() with the operator's DEFAULT (constructor /
+        # champion) config — the same path the single mazemaker_recall tool
+        # uses (~0.7-1.4s/angle). The previous code FORCED enable_colbert=True
+        # (+colbert_weight 1.5) and enable_dae=True per angle, which ran full
+        # ColBERT late-interaction over the ~98% auto:turn corpus that has NO
+        # cached colbert_tokens — ~12s PER ANGLE on the 200k corpus, so
+        # recall_multi took 25-37s and 502'd the wonderland proxy. Multi-angle
+        # RRF fusion is itself the quality lever here; the constructor's tuned
+        # colbert weight still applies via the defaults. See
+        # bug:recall-batch-cold-path.
         per_query_results: list[list[dict]] = [
-            self.recall(q, k=per_q, hybrid=True,
-                        enable_colbert=True, colbert_weight=1.5,
-                        enable_dae=True, dae_weight=1.0)
-            for q in queries
+            self.recall(q, k=per_q) for q in queries
         ]
 
         if not fuse:

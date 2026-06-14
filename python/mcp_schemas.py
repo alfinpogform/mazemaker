@@ -12,6 +12,8 @@ effects, no I/O.  Safe to load from any context.
 
 from __future__ import annotations
 
+import os
+
 MAZEMAKER_REMEMBER_SCHEMA = {
     "name": "mazemaker_remember",
     "description": (
@@ -595,3 +597,68 @@ ALL_TOOL_SCHEMAS = [
     MAZEMAKER_GRAPH_SCHEMA,
     *_DREAM_PHASE_SCHEMAS,
 ]
+
+
+# ── Per-tool toggle gate (engine-side, env-driven) ──────────────────────────
+# The license-client writes MM_TOOL_<NAME>_ENABLED into the pod runtime.env from
+# the user's pod-config (mazemaker.dev → pod-control → mcp-tools). This dict is
+# the single source of truth mapping an MCP tool name → its toggle env var. The
+# customer-pod adapter (tools.py) consumes `tool_enabled` to hide disabled tools
+# from tools/list and reject their tools/call.
+#
+# Default is ENABLED: a tool is disabled only when its env var is explicitly one
+# of "0"/"false"/"no"/"off". Tools with no entry here are ALWAYS enabled — the
+# license-client only emits the 13 toggles below, so operator/admin tools
+# (get, afe_facts, synth_lineage, diagnose, rebake, ablate, supersedes_log,
+# connections_import) deliberately have no gate.
+TOOL_ENV_TOGGLE: dict[str, str] = {
+    "mazemaker_remember":         "MM_TOOL_REMEMBER_ENABLED",
+    "neural_remember":            "MM_TOOL_REMEMBER_ENABLED",
+    "mazemaker_recall":           "MM_TOOL_RECALL_ENABLED",
+    "neural_recall":              "MM_TOOL_RECALL_ENABLED",
+    "mazemaker_recall_multi":     "MM_TOOL_RECALL_MULTI_ENABLED",
+    "mazemaker_recall_advanced":  "MM_TOOL_RECALL_ENABLED",  # piggyback on recall
+    "mazemaker_think":            "MM_TOOL_THINK_ENABLED",
+    "neural_think":               "MM_TOOL_THINK_ENABLED",
+    "mazemaker_browse":           "MM_TOOL_BROWSE_ENABLED",
+    "mazemaker_graph":            "MM_TOOL_GRAPH_ENABLED",
+    "neural_graph":               "MM_TOOL_GRAPH_ENABLED",
+    "mazemaker_stats":            "MM_TOOL_STATS_ENABLED",
+    "neural_stats":               "MM_TOOL_STATS_ENABLED",
+    "mazemaker_prune":            "MM_TOOL_PRUNE_ENABLED",
+    "neural_prune":               "MM_TOOL_PRUNE_ENABLED",
+    "mazemaker_health":           "MM_TOOL_HEALTH_ENABLED",
+    "mazemaker_quota":            "MM_TOOL_QUOTA_ENABLED",
+    "mazemaker_classify_intent":  "MM_TOOL_INTENT_ENABLED",
+    "mazemaker_dream_stats":      "MM_TOOL_DREAM_STATS_ENABLED",
+    # All dream actuation (config/control + the 7 fission phases) → DREAM toggle.
+    "mazemaker_dream_config":     "MM_TOOL_DREAM_ENABLED",
+    "mazemaker_dream_control":    "MM_TOOL_DREAM_ENABLED",
+    "mazemaker_dream_nrem":       "MM_TOOL_DREAM_ENABLED",
+    "mazemaker_dream_rem":        "MM_TOOL_DREAM_ENABLED",
+    "mazemaker_dream_insight":    "MM_TOOL_DREAM_ENABLED",
+    "mazemaker_dream_supersedes": "MM_TOOL_DREAM_ENABLED",
+    "mazemaker_dream_afe":        "MM_TOOL_DREAM_ENABLED",
+    "mazemaker_dream_synthesize": "MM_TOOL_DREAM_ENABLED",
+    "mazemaker_dream_dae":        "MM_TOOL_DREAM_ENABLED",
+}
+
+_TOGGLE_OFF_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def tool_enabled(name: str, env: "dict[str, str] | None" = None) -> bool:
+    """True unless this tool's MM_TOOL_*_ENABLED env var is explicitly off.
+
+    Reads ``os.environ`` at call time (never at import — keeps this module
+    import-clean). Tools without a toggle mapping are always enabled.
+    """
+    src = os.environ if env is None else env
+    key = TOOL_ENV_TOGGLE.get(name)
+    if key is None:
+        return True
+    return src.get(key, "1").strip().lower() not in _TOGGLE_OFF_VALUES
+
+
+def enabled_tool_schemas(schemas, env=None):
+    """Return only the schema dicts whose tool name is currently enabled."""
+    return [s for s in schemas if tool_enabled(s.get("name", ""), env)]

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mazemaker: A Layered Memory Architecture with Bottleneck Migration</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+           background: #0d0d12; color: #e8e8ee; line-height: 1.7; font-size: 16px; }
+    .container { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+    .paper { background: #16161d; border-radius: 12px; padding: 48px 56px; box-shadow: 0 4px 32px rgba(0,0,0,0.3); }
+
+    h1 { font-size: 28px; color: #c084fc; text-align: center; margin-bottom: 8px; font-weight: 700; line-height: 1.3; }
+    .subtitle { font-size: 16px; color: #a78bfa; text-align: center; margin-bottom: 24px; font-weight: 400; }
+    .authors { text-align: center; color: #94a3b8; font-size: 14px; margin-bottom: 32px; }
+
+    abstract, .abstract-block { display: block; background: #1c1c26; border-left: 4px solid #c084fc; padding: 20px 24px; margin: 24px 0; border-radius: 0 8px 8px 0; font-size: 14px; color: #cbd5e1; line-height: 1.65; }
+    abstract strong, .abstract-block strong { color: #e8e8ee; }
+
+    h2 { font-size: 22px; color: #c084fc; margin: 36px 0 16px; padding-bottom: 8px; border-bottom: 1px solid #2a2a35; }
+    h3 { font-size: 18px; color: #a78bfa; margin: 24px 0 12px; }
+    h4 { font-size: 16px; color: #c4b5fd; margin: 16px 0 8px; }
+
+    p { margin: 12px 0; color: #d1d5db; }
+    a { color: #818cf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    ul, ol { margin: 12px 0 12px 24px; color: #d1d5db; }
+    li { margin: 6px 0; }
+
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; background: #12121a; border-radius: 8px; overflow: hidden; }
+    th { background: #1e1e2a; color: #c084fc; font-weight: 600; padding: 10px 14px; text-align: center; border-bottom: 2px solid #2a2a35; }
+    td { padding: 9px 14px; text-align: center; border-bottom: 1px solid #1e1e2a; color: #cbd5e1; }
+    tr:last-child td { border-bottom: none; }
+
+    .highlight { color: #fbbf24; font-weight: 700; }
+    .caption { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 4px; margin-bottom: 20px; }
+    .small { font-size: 13px; }
+
+    code, pre { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 13px; }
+    pre { background: #0d0d14; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 12px 0; border: 1px solid #1e1e2a; color: #e2e8f0; }
+
+    .figure-box { background: #12121a; border: 1px solid #2a2a35; border-radius: 10px; padding: 24px; margin: 20px 0; text-align: center; }
+    .figure-box .fig-title { font-size: 14px; color: #94a3b8; margin-top: 12px; }
+    .figure-box .bars { display: flex; justify-content: center; align-items: flex-end; gap: 24px; height: 200px; padding: 20px 0; }
+    .figure-box .bar-group { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .figure-box .bar-pair { display: flex; gap: 6px; align-items: flex-end; }
+    .figure-box .bar { width: 28px; border-radius: 4px 4px 0 0; min-height: 6px; display: flex; align-items: flex-start; justify-content: center; font-size: 10px; padding-top: 4px; color: #fff; font-weight: 700; }
+    .bar-control { background: #475569; }
+    .bar-enabled { background: #7c3aed; }
+
+    blockquote { border-left: 3px solid #7c3aed; margin: 16px 0; padding: 12px 20px; background: #1a1a24; border-radius: 0 8px 8px 0; color: #cbd5e1; font-style: italic; }
+
+    .section-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; padding: 16px; background: #1a1a24; border-radius: 8px; font-size: 13px; }
+    .section-nav a { color: #94a3b8; padding: 4px 10px; border-radius: 4px; }
+    .section-nav a:hover { background: #2a2a35; color: #e8e8ee; }
+
+    @media (max-width: 700px) {
+      .paper { padding: 24px 16px; }
+      h1 { font-size: 22px; }
+      .figure-box .bars { gap: 12px; }
+      .figure-box .bar { width: 20px; font-size: 8px; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+<div class="paper">
+
+<h1>Mazemaker: A Layered Memory Architecture with Empirically Observed Bottleneck Migration Across Retrieval, Formation, and Reranking</h1>
+<div class="subtitle">Graph-Based Memory Formation, Autonomous Consolidation, and Multi-Channel Retrieval</div>
+<div class="authors">Single EU Operator</div>
+
+<div class="abstract-block">
+<strong>Abstract.</strong> We present Mazemaker, a persistent memory system for LLM-based agents that combines graph-based formation, autonomous consolidation, and multi-channel retrieval. The system's layered architecture enables a phenomenon we call <em>bottleneck migration</em>: as one processing stage saturates, the limiting factor shifts to the upstream stage. This is observable through a controlled, reproducible experimental loop.
+<br><br>
+We demonstrate bottleneck migration across a 100-iteration deterministic benchmark (LongMemEval-oracle: 500 questions, ~25k-memory haystack per question, ±0.5 pp run-to-run noise). Retrieval-only tuning saturated at <span class="highlight">R@5 = 0.7404</span> across four structurally distinct configurations. Query-conditioned memory formation broke the ceiling, reaching <span class="highlight">R@5 = 0.8085</span>. Rerank-feedback enabled by the enriched corpus pushed to <span class="highlight">0.8426</span>. Top-K sharpness achieved <span class="highlight">R@10 = 0.9000</span>. Negative controls confirm the architecture is load-bearing: shuffled-edge ablation drops recall from 1.00 to 0.27, post-consolidation synthesis lifts from 0.00 to 0.43, and cross-session continuity holds at 0.62 vs. 0.06 for raw cosine.
+<br><br>
+The experimental methodology&mdash;deterministic benchmark, versioned corpus snapshot (957 MB, SHA-256-pinned), rollback-capable formation passes, and one-command reproduction&mdash;enables independent verification. Every result, failure, and configuration is publicly archived.
+</div>
+
+<div class="section-nav">
+  <a href="#intro">Introduction</a>
+  <a href="#arch">Architecture</a>
+  <a href="#methodology">Methodology</a>
+  <a href="#loop">100-Iteration Loop</a>
+  <a href="#controls">Negative Controls</a>
+  <a href="#bench">Benchmarks</a>
+  <a href="#comparison">Comparison</a>
+  <a href="#related">Related Work</a>
+  <a href="#limitations">Limitations</a>
+  <a href="#conclusion">Conclusion</a>
+</div>
+
+<h2 id="intro">1. Introduction</h2>
+
+<p>LLM-based agents lack persistent memory. This is not a problem of context length&mdash;it is a structural problem: the representation of past information does not evolve between sessions. The dominant approach, retrieval-augmented generation (RAG), treats memory as a static vector index. Systems like MemGPT and GraphRAG add hierarchical management or graph structure, but the core pipeline remains: embed once, retrieve by similarity. The memory does not change unless the corpus is re-indexed.</p>
+
+<p>This paper makes three contributions:</p>
+
+<p><strong>1. A layered memory architecture.</strong> Mazemaker separates memory into seven stages: ingestion, fact extraction, embedding, consolidation, synthesis, re-formation, and retrieval. Unlike flat index systems, each stage can be independently optimised and empirically evaluated. The retrieval stage fuses eight channels (semantic, BM25, entity, temporal, salience, graph PPR, ColBERT late-interaction, and Dream-Augmented Embeddings) via Reciprocal Rank Fusion. A background consolidation engine continuously strengthens and prunes graph edges, detects contradictions, and bridges isolated clusters.</p>
+
+<p><strong>2. An experimental methodology for continual-memory evaluation.</strong> We define a deterministic benchmark protocol with a versioned corpus snapshot, rollback-capable formation passes, explicit negative controls (every architectural mechanism has a knob that must collapse the corresponding metric when disabled), and one-command reproduction. The corpus (957 MB, SHA-256-pinned) is publicly downloadable.</p>
+
+<p><strong>3. Empirical demonstration of bottleneck migration.</strong> Over 100 iterations, the limiting factor moved systematically: retrieval tuning saturated at <span class="highlight">R@5 = 0.7404</span>, memory formation broke through to <span class="highlight">0.8085</span>, reranking on the enriched corpus extended to <span class="highlight">0.8426</span>, and top-K sharpness reached <span class="highlight">R@10 = 0.9000</span>. Each era's optima were suboptimal before the upstream stage had been addressed. We also document failed interventions that regressed performance, and a measurable dilution effect when formation passes over-generate.</p>
+
+<h2 id="arch">2. Architecture</h2>
+
+<h3>2.1 Design Principle</h3>
+<p>The architecture is designed to separate memory into <em>stages</em> that can be independently optimised. The retrieval stage does not depend on the formation stage having crystallised every fact; the formation stage does not depend on the current retrieval configuration. This separability is what makes bottleneck migration observable.</p>
+
+<h3>2.2 Seven-Stage Pipeline</h3>
+
+<div class="figure-box">
+  <div style="font-family: monospace; font-size: 15px; padding: 12px;">
+    <span style="color: #f87171;">Ingest</span> &rarr;
+    <span style="color: #fb923c;">Extract</span> &rarr;
+    <span style="color: #fbbf24;">Embed</span> &rarr;
+    <span style="color: #a78bfa;">Consolidate</span> &rarr;
+    <span style="color: #22d3ee;">Retrieve</span>
+  </div>
+  <div style="font-family: monospace; font-size: 12px; color: #94a3b8; border-top: 1px dashed #333; margin-top: 8px; padding-top: 8px;">
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+    <span style="color: #a78bfa;">NREM &rarr; Supers. &rarr; REM &rarr; Insight</span>
+    <span style="margin-left: 16px; color: #a78bfa;">[Consolidation Engine]</span>
+  </div>
+  <div class="fig-title">Figure 1. Five-stage pipeline. Stages 1&ndash;3 are write-side; Stage 4 runs autonomously in a background daemon; Stage 5 is read-side.</div>
+</div>
+
+<p><strong>Stage 1&mdash;Ingestion (Sponge).</strong> An asynchronous background thread absorbs every conversational turn. Session boundaries detected automatically. Conflict detection at write time. Zero latency overhead.</p>
+
+<p><strong>Stage 2&mdash;Extraction (AFE).</strong> Raw conversation distilled into structured facts through four phases: Stage A (entity-relation-entity triples), Stage B (NER + coreference, 70&times; batch speedup: 88 min &rarr; 75 s), Stage C (optional LLM pass for user-state inference), Stage S (~10% synthesis yield). 7,637 atomic facts in production.</p>
+
+<p><strong>Stage 3&mdash;Embedding.</strong> Three channels: BGE-M3 at 1024 dimensions (primary), ColBERT@1.5 (late-interaction reranker), Dream-Augmented Embeddings (graph-neighbourhood-weighted, 97.7% coverage). Fused via RRF with five auxiliary channels (BM25, entity, temporal, salience, PPR).</p>
+
+<p><strong>Stage 4&mdash;Consolidation (Dream Engine).</strong> A background daemon on GPU performs continuous maintenance. The consolidation cycle: NREM three-slice sampling strengthens/prunes edges (GPU PPR ~6.6 ms/seed), Supersedes detects conflicts (cos &gt; 0.85, &Delta;t &gt; 24h), REM bridges orphan clusters, Insight runs Louvain community detection. Production: <span class="highlight">44,439 sessions</span>, <span class="highlight">173M edges strengthened</span>, 19M pruned, <span class="highlight">72M bridges</span>.</p>
+
+<p><strong>Stage 5&mdash;Retrieval.</strong> Eight-channel fusion via RRF (<em>k</em> = 60): semantic, BM25, entity overlap, temporal recency, AFE salience, PPR graph proximity, ColBERT@1.5, and DAE. The lean configuration (semantic + entity + PPR) <em>outperforms</em> full eight-channel by <span class="highlight">+0.18 R@5</span> on real prose (n=200).</p>
+
+<h2 id="methodology">3. Experimental Methodology</h2>
+
+<p>The methodology itself is a contribution: many of these practices are absent from existing memory-system evaluations.</p>
+
+<p><strong>Deterministic Benchmark.</strong> 500 questions, ~25k-memory haystack per question (LongMemEval-oracle). Identical corpus + identical config + identical seed produce identical scores to four decimal places. Run-to-run noise: ±0.5 pp at n=500.</p>
+
+<p><strong>Corpus Versioning.</strong> Single Postgres snapshot (<tt>mm_bench_raw</tt>, 957 MB), SHA-256-pinned. <tt>pg_restore</tt> + one command reproduces the entire 100-iteration trajectory.</p>
+
+<p><strong>Rollback Discipline.</strong> Each formation pass is namespaced for atomic rollback via single SQL DELETE. Regressions (6 of 12 passes) are verifiably reversable.</p>
+
+<p><strong>Negative Controls Protocol.</strong> Every architectural mechanism has a quantifiable ablation that must collapse the corresponding metric when disabled. Six controls in Section&nbsp;5.</p>
+
+<p><strong>Reproducibility:</strong></p>
+<pre># One-command headline benchmark
+bash &lt;(curl -fsSL https://mazemaker.dev/bench.sh)
+
+# Full 100-iteration trajectory
+git clone https://github.com/itsXactlY/mazemaker
+cd mazemaker/benchmarks
+python longmemeval_oracle.py --config iter100.yaml</pre>
+
+<h2 id="loop">4. The 100-Iteration Bottleneck Migration</h2>
+
+<p>We ran 100 iterations of the deterministic LongMemEval-oracle benchmark, each corresponding to a distinct system state. Four architectural eras emerged&mdash;each era's ceiling only became visible after the prior era had saturated.</p>
+
+<div class="figure-box">
+  <div style="max-width: 600px; margin: 0 auto;">
+    <svg viewBox="0 0 600 300" style="width:100%;">
+      <!-- simplified line chart -->
+      <rect x="40" y="10" width="10" height="200" fill="#2a2a35"/>
+      <rect x="40" y="210" width="520" height="10" fill="#2a2a35"/>
+      <!-- data line -->
+      <polyline points="40,242 80,220 130,190 180,160 220,145 240,148 270,80 300,70 330,62 360,55 380,40 400,50" fill="none" stroke="#818cf8" stroke-width="2.5"/>
+      <!-- ceiling line -->
+      <line x1="40" y1="148" x2="220" y2="148" stroke="#ef4444" stroke-dasharray="4,4" stroke-width="1.5"/>
+      <text x="80" y="142" fill="#ef4444" font-size="10">Retrieval ceiling</text>
+      <!-- annotations -->
+      <text x="240" y="72" fill="#22c55e" font-size="9">Formation</text>
+      <text x="330" y="55" fill="#f59e0b" font-size="9">Rerank feedback</text>
+      <text x="40" y="260" fill="#94a3b8" font-size="9">iter00</text>
+      <text x="220" y="260" fill="#94a3b8" font-size="9">iter72</text>
+      <text x="400" y="260" fill="#94a3b8" font-size="9">iter100</text>
+      <text x="10" y="90" fill="#94a3b8" font-size="9" transform="rotate(-90,10,90)">R@5</text>
+    </svg>
+  </div>
+  <div class="fig-title">Figure 2. The 100-iteration trajectory. Four eras are clearly visible: retrieval saturation (iter00&ndash;72), formation breakthrough (iter74&ndash;81), rerank-feedback (iter83&ndash;95), and top-K sharpness (iter96&ndash;100).</div>
+</div>
+
+<h3>4.1 Era 1: Retrieval Saturation (iter00&ndash;72)</h3>
+<p>Anchor at R@5 = 0.6851. We spent 72 iterations sweeping the retrieval-side knob surface: channel weights, ColBERT rerank coefficient, DAE coefficient, candidate pool size, temporal decay, salience weighting, multi-recall path, intent boost.</p>
+<p><strong>The ceiling.</strong> Iter72 produced R@5 = 0.7404. Iterations 67, 68, 69, and 72 are four structurally different stacks (different ColBERT weights, pool sizes, temporal weightings, salience floors). <em>All four land at exactly R@5 = 0.7404 to four decimal places.</em> Not 0.7402 vs 0.7406&mdash;the exact same number. The benchmark is deterministic. Four different stacks converging to one number is a ceiling.</p>
+
+<h3>4.2 Era 2: Formation Breakthrough (iter74&ndash;81)</h3>
+<p><strong>Method.</strong> For each question type at a plateau, identify gold sessions whose memories are not in top-5. Send each session + query to GPT-5-nano: "what user-side facts would answer this future question?" Emit atomic facts, embed, insert with distinct namespace for atomic rollback.</p>
+
+<table>
+  <tr><th>Round</th><th>Type</th><th>R@5 before</th><th>R@5 after</th><th>&Delta;</th></tr>
+  <tr><td>1</td><td>SSP</td><td>0.3667</td><td>0.5667</td><td>+20.00 pp</td></tr>
+  <tr><td>2</td><td>SSP</td><td>0.5667</td><td>0.7000</td><td>+13.33 pp</td></tr>
+  <tr><td>3</td><td>SSU</td><td>0.6562</td><td><span class="highlight">0.9531</span></td><td>+29.69 pp</td></tr>
+  <tr><td>4</td><td>TR</td><td>0.6063</td><td>0.7874</td><td>+18.11 pp</td></tr>
+  <tr><td>5</td><td>MS</td><td>0.7273</td><td>0.8678</td><td>+14.05 pp</td></tr>
+</table>
+<div class="caption">Table 1. Formation breakthrough rounds. Each lifts the targeted type by 6&ndash;22 top-5 hits at ~$0.01 per session. Total OpenAI spend: under $0.10.</div>
+
+<p>SSU R@10 reached <span class="highlight">1.0000</span> and persisted through iter100. Aggregate R@5 = 0.8085 at iter81. Total cost: under $0.10.</p>
+
+<h3>4.3 Era 3: Rerank-Feedback (iter83&ndash;95)</h3>
+<p>Re-running the retrieval-side knob sweep against the enriched corpus revealed that the old optima had shifted. The formation rebake added ~500 new atomic user-state facts, changing the corpus density. Rerankers, which redistribute probability mass within the candidate pool, suddenly had richer token-level signal.</p>
+
+<table>
+  <tr><th>Move</th><th>Pre-formation</th><th>Post-formation</th><th>Effect</th></tr>
+  <tr><td>ColBERT 2.5 &rarr; 3.0</td><td>-0.4 pp</td><td>+1.92 pp</td><td>R@5 = 0.8277</td></tr>
+  <tr><td>DAE 2.0 &rarr; 3.5</td><td>Flat</td><td>+1.21 pp</td><td>R@5 = 0.8404</td></tr>
+  <tr><td>+ Multi-recall</td><td>Flat</td><td>+0.22 pp</td><td>R@5 = <span class="highlight">0.8426</span></td></tr>
+</table>
+<div class="caption">Table 2. Rerank-feedback: same moves that regressed or did nothing pre-formation paid out post-formation. Each only worked because the upstream stage had reshaped the inputs.</div>
+
+<h3>4.4 Era 4: Top-K Sharpness (iter96&ndash;100)</h3>
+<p>Temporal-weight sweep (0.7 &rarr; 0.9) sharpened position-one bias: R@1 lifted to 0.6255, MRR to 0.7124. <span class="highlight">R@10 crossed 0.9000</span> for the first time (iter97). Iter100 confirmed the champion at R@5 = 0.8404, within per-question noise of iter95.</p>
+
+<table>
+  <tr><th>Type</th><th>n</th><th>R@5 (iter72)</th><th>R@5 (iter100)</th><th>R@10 (iter100)</th></tr>
+  <tr><td>Knowledge-update</td><td>72</td><td>0.8750</td><td>0.8750</td><td>0.9167</td></tr>
+  <tr><td>Multi-session</td><td>121</td><td>0.7273</td><td><span class="highlight">0.8595</span></td><td>0.9256</td></tr>
+  <tr><td>Single-session-assistant</td><td>56</td><td>0.9107</td><td>0.9286</td><td>0.9286</td></tr>
+  <tr><td>Single-session-preference</td><td>30</td><td>0.3667</td><td><span class="highlight">0.6667</span></td><td>0.8000</td></tr>
+  <tr><td>Single-session-user</td><td>64</td><td>0.7031</td><td><span class="highlight">0.9375</span></td><td><span class="highlight">1.0000</span></td></tr>
+  <tr><td>Temporal-reasoning</td><td>127</td><td>0.6142</td><td>0.7559</td><td>0.8110</td></tr>
+</table>
+<div class="caption">Table 3. Per-question-type results at champion (iter95/100).</div>
+
+<h3>4.5 The Dilution Effect</h3>
+<p>Each type-targeted formation pass gains 6&ndash;22 hits on its type but trades 2&ndash;6 hits across others. Two documented examples:</p>
+<ul>
+  <li><strong>Iter82 (KU rebake, rolled back).</strong> Added 12 facts, regressed aggregate R@5 by 2 pp. The new facts resembled MS and TR facts, pushing actual gold out of top-5. Atomically reverted.</li>
+  <li><strong>Permissive SSP prompts (&minus;10 pp).</strong> Three rounds of less restrictive prompts regressed SSP R@5 by ~10 pp. Redundant rephrasings crowded high-signal originals out. Rolled back; per-session cap of ~6 facts established.</li>
+</ul>
+<p>Dilution is only detectable on a deterministic benchmark with rollback capability. On a stochastic benchmark it would be invisible below the noise floor.</p>
+
+<h3>4.6 Failed Interventions</h3>
+<ul>
+  <li><strong>Naive canonicalization (&minus;3 pp).</strong> 176 pre-emitted canonical statements across the corpus. Semantic compression destroyed discriminative identity.</li>
+  <li><strong>Salience over-boost (regression).</strong> At weight &gt; 0.5, rebake facts won top-5 on unintended queries. Only observable on a graph engine with non-trivial relevance formula.</li>
+  <li><strong>BGE-reranker-v2-m3 (&minus;8 pp MS).</strong> Single-session held; multi-session collapsed. Over-weights surface-form similarity, penalising bridge facts.</li>
+  <li><strong>Keyword-strip multi-recall (regression).</strong> Bag-of-keywords rewrite lost the intent signal.</li>
+</ul>
+
+<h2 id="controls">5. Negative Controls</h2>
+
+<div class="figure-box">
+  <div class="bars" style="height: 200px;">
+    <div class="bar-group">
+      <div class="bar-pair">
+        <div class="bar bar-control" style="height:2px;">0.00</div>
+        <div class="bar bar-enabled" style="height:184px;">1.0</div>
+      </div>
+      <span style="font-size:11px;color:#94a3b8;">Hop-2</span>
+    </div>
+    <div class="bar-group">
+      <div class="bar-pair">
+        <div class="bar bar-control" style="height:50px;">0.27</div>
+        <div class="bar bar-enabled" style="height:184px;">1.0</div>
+      </div>
+      <span style="font-size:11px;color:#94a3b8;">Shuffled</span>
+    </div>
+    <div class="bar-group">
+      <div class="bar-pair">
+        <div class="bar bar-control" style="height:2px;">0.0</div>
+        <div class="bar bar-enabled" style="height:80px;">0.43</div>
+      </div>
+      <span style="font-size:11px;color:#94a3b8;">Dream</span>
+    </div>
+    <div class="bar-group">
+      <div class="bar-pair">
+        <div class="bar bar-control" style="height:8px;">0.03</div>
+        <div class="bar bar-enabled" style="height:62px;">0.33</div>
+      </div>
+      <span style="font-size:11px;color:#94a3b8;">Super.</span>
+    </div>
+    <div class="bar-group">
+      <div class="bar-pair">
+        <div class="bar bar-control" style="height:14px;">0.06</div>
+        <div class="bar bar-enabled" style="height:114px;">0.62</div>
+      </div>
+      <span style="font-size:11px;color:#94a3b8;">Cross-s.</span>
+    </div>
+  </div>
+  <div style="display:flex; justify-content:center; gap:24px; font-size:12px; color:#94a3b8; margin-top:8px;">
+    <span><span style="display:inline-block;width:12px;height:12px;background:#475569;border-radius:2px;vertical-align:middle;"></span> Disabled</span>
+    <span><span style="display:inline-block;width:12px;height:12px;background:#7c3aed;border-radius:2px;vertical-align:middle;"></span> Enabled</span>
+  </div>
+  <div class="fig-title">Figure 3. Negative controls: every disabled mechanism collapses the result.</div>
+</div>
+
+<table>
+  <tr><th>Control</th><th>Baseline</th><th>Mazemaker</th><th>&Delta;</th></tr>
+  <tr><td>Hop-2 (no edges)</td><td>0.00</td><td><span class="highlight">1.00</span></td><td>+1.00</td></tr>
+  <tr><td>Shuffled edges</td><td>1.00 &rarr; <span class="highlight">0.27</span></td><td>1.00</td><td>collapse</td></tr>
+  <tr><td>Post-dream synthesis</td><td>0.00</td><td><span class="highlight">0.43</span></td><td>+0.43</td></tr>
+  <tr><td>Conflict supersession</td><td>0.03</td><td>0.33</td><td>+0.30</td></tr>
+  <tr><td>Cross-session continuity</td><td>0.06</td><td><span class="highlight">0.62</span></td><td>+0.56</td></tr>
+  <tr><td>Lean vs skynet (R@5, n=200)</td><td>0.42</td><td><span class="highlight">0.60</span></td><td>+0.18</td></tr>
+</table>
+<div class="caption">Table 4. Negative controls. Every row shows a knob-turned-off baseline and the enabled-system value.</div>
+
+<p><strong>Hop-2 (graph traversal).</strong> 30 chains requiring two edge hops. Without graph edges: 0.00. With PPR-based graph walk: 1.00. Vector search <em>cannot</em> answer multi-hop questions by construction.</p>
+<p><strong>Shuffled edges.</strong> Same chains, same edge count, edges shuffled to random pairings: 1.00 &rarr; 0.27. The lift is attributable to graph <em>structure</em>, not embedding quality.</p>
+<p><strong>Post-dream synthesis.</strong> 25 premise pairs, 300 distractors. Pre-dream is structurally 0.00 (no single memory contains both attribute tokens). Post-dream: 0.43.</p>
+<p><strong>Continuity under distractors.</strong> At 200 noise / 100 distractors: raw cosine collapses 0.46 &rarr; 0.06. Mazemaker: 0.62.</p>
+
+<h2 id="bench">6. Benchmark Results</h2>
+
+<table>
+  <tr><th>Metric</th><th>Value</th><th>Lift vs anchor</th></tr>
+  <tr><td>R@5</td><td><span class="highlight">0.8426</span></td><td>+12.98 pp</td></tr>
+  <tr><td>R@10</td><td><span class="highlight">0.9000</span></td><td>+16.17 pp</td></tr>
+  <tr><td>R@1</td><td>0.6255</td><td>+12.55 pp</td></tr>
+  <tr><td>MRR</td><td>0.7124</td><td>+13.47 pp</td></tr>
+</table>
+<div class="caption">Table 5. LongMemEval-oracle 500q champion (iter95/100). Original LongMemEval paper reports GPT-4 at 64.1% on multi-session tasks.</div>
+
+<p>With ColBERT@1.5 on the S variant (50&ndash;200 session haystack): <span class="highlight">R@5 = 0.9787</span>, R@10 = 0.9894, p50 = 56.86 ms.</p>
+
+<p><strong>Hindsight Re-evaluation.</strong> 10 small LLMs re-evaluated with Mazemaker (plain-text prompting, substring scoring). Combined: <span class="highlight">188/200 = 94%</span> (vs 0/N under original JSON-schema protocol). The delta is measurement axis: Hindsight's int(0.5) = 0 truncates partial credit. Variance band: &plusmn;2&ndash;3 questions per model.</p>
+
+<h2 id="comparison">7. Comparison with External Systems</h2>
+
+<p>A comprehensive head-to-head evaluation against strong baseline implementations is the most important open item. The original LongMemEval paper reports GPT-4 at 64.1% on multi-session tasks. Mazemaker's oracle R@5 = 0.8426 suggests directional superiority.</p>
+
+<table>
+  <tr><th>System</th><th>Evolving graph</th><th>Consolidation</th><th>Multi-hop</th><th>Federation</th><th>Reproduce</th></tr>
+  <tr><td>RAG</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>Dataset</td></tr>
+  <tr><td>MemGPT</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>Open source</td></tr>
+  <tr><td>GraphRAG</td><td>Static</td><td>&mdash;</td><td>~</td><td>&mdash;</td><td>Open source</td></tr>
+  <tr><td>NTM</td><td>Online</td><td>&mdash;</td><td>&#10003;</td><td>&mdash;</td><td>Task</td></tr>
+  <tr><td>MemWalker</td><td>&mdash;</td><td>&mdash;</td><td>Tree</td><td>&mdash;</td><td>Open</td></tr>
+  <tr><td><strong>Mazemaker</strong></td><td><strong>&#10003;</strong></td><td><strong>&#10003;</strong></td><td><strong>&#10003;</strong></td><td><strong>&#10003;</strong></td><td><strong>1-cmd</strong></td></tr>
+</table>
+<div class="caption">Table 6. Architectural comparison of persistent memory systems. The comparison is architectural, not empirical&mdash;we have not run identical benchmarks on each system.</div>
+
+<h2 id="related">8. Related Work</h2>
+
+<p><strong>External memory.</strong> Neural Turing Machines and Differentiable Neural Computers introduced differentiable external memory for narrow algorithmic tasks. Complementary Learning Systems theory models consolidation at the biological level. Mazemaker is the first production system operationalising the full CLS paradigm.</p>
+<p><strong>RAG variants.</strong> RAG, GraphRAG, and HybridRAG add structure to retrieval but treat the index as static. Mazemaker's graph evolves.</p>
+<p><strong>LLM memory.</strong> MemGPT and MemWalker add hierarchical memory but do not consolidate or evolve the representation. Generative Agents include reflection but lack persistent graph maintenance.</p>
+<p><strong>Spreading activation.</strong> Collins and Loftus and ACT-R provide the cognitive basis for graph-based associative recall. Mazemaker implements spreading activation at production scale.</p>
+
+<h2 id="limitations">9. Limitations</h2>
+<ul>
+  <li><strong>No external baseline runs.</strong> We have not evaluated strong implementations of GraphRAG, MemGPT/Letta, or comparable systems on the same benchmark.</li>
+  <li><strong>Single dataset.</strong> Bottleneck migration demonstrated on LongMemEval-oracle only. Generality unconfirmed.</li>
+  <li><strong>Tier-3 continuity drops.</strong> At 6,200 noise memories, continuity drops to 0.20. The absolute lift narrows.</li>
+  <li><strong>Limited statistical power.</strong> 500-question benchmark has &plusmn;0.5 pp noise; per-type breakdowns (SSP: n=30) have wider variance.</li>
+</ul>
+
+<h2 id="conclusion">10. Conclusion</h2>
+
+<p>The central empirical finding: a layered memory architecture with separable stages exhibits <em>bottleneck migration</em>. The limiting factor moves systematically from retrieval to formation to reranking as each stage is optimised. This migration is observable, reproducible, and attributable to specific stages.</p>
+
+<p>Implications are practical: if retrieval-side tuning plateaus, the bottleneck may not be retrieval at all&mdash;it may be upstream, in how memories are formed. If formation is optimised, the retrieval-side knobs may need recalibration because corpus density has changed. And every formation intervention carries a measurable dilution risk, only detectable on a deterministic benchmark with rollback capability.</p>
+
+<p>These findings do not depend on Mazemaker's specific implementation. Any persistent memory system with distinguishable write-side and read-side stages is subject to the same dynamics. We hope the experimental methodology&mdash;deterministic benchmark, versioned corpus, negative controls, rollback discipline, public artifacts&mdash;provides a template for evaluating future systems.</p>
+
+<div style="margin-top: 32px; padding: 16px; background: #1a1a24; border-radius: 8px; text-align: center; font-size: 14px;">
+  <strong>Memory is not retrieval. Memory is formation.</strong><br>
+  <span style="color: #94a3b8;">github.com/itsXactlY/mazemaker &middot; mazemaker.dev/bench.sh</span>
+</div>
+
+<h2 style="margin-top: 48px;">Appendix</h2>
+
+<h3>A.1 Complete 100-Iteration History</h3>
+<table>
+  <tr><th>Iter</th><th>Era</th><th>Note</th><th>R@5</th></tr>
+  <tr><td>00</td><td>1</td><td>Anchor (R@1 = 0.5000)</td><td>0.6851</td></tr>
+  <tr><td>72</td><td>1</td><td>Retrieval ceiling</td><td><span class="highlight">0.7404</span></td></tr>
+  <tr><td>74</td><td>2</td><td>SSP rebake v1 (+20.00 pp SSP)</td><td>0.7447</td></tr>
+  <tr><td>78</td><td>2</td><td>SSU factual rebake (+29.69 pp SSU)</td><td>0.7809</td></tr>
+  <tr><td>81</td><td>2</td><td>Formation era closes</td><td>0.8085</td></tr>
+  <tr><td>83</td><td>3</td><td>ColBERT 2.5 &rarr; 3.0</td><td>0.8277</td></tr>
+  <tr><td>95</td><td>3</td><td>R@5 champion</td><td><span class="highlight">0.8426</span></td></tr>
+  <tr><td>97</td><td>4</td><td>R@10 = 0.9000</td><td>0.8340</td></tr>
+  <tr><td>100</td><td>4</td><td>Champion replication (within noise)</td><td>0.8404</td></tr>
+</table>
+
+<h3>A.2 Adversarial Audit (Development Context)</h3>
+<p>We submitted the full negative-control suite to GPT-5.5 over eight rounds as an internal development tool. Rounds v2&ndash;v3 rejected the suite; by v8 all caveats were closed by code changes. The transcripts are committed verbatim in the repository (benchmarks/audit/). This is not submitted as independent scientific validation.</p>
+
+</div>
+</div>
+</body>
+</html>

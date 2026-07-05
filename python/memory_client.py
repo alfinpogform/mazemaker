@@ -485,12 +485,15 @@ class SQLiteStore:
             emb = r.get("embedding") or []
             blob = struct.pack(f"{len(emb)}f", *emb)
             salience = r.get("salience")
+            # Per-row event time (epoch seconds) for imports/backfills;
+            # falls back to ingestion time for live writes.
+            ca = r.get("created_at")
             params.append((
                 r.get("label"),
                 r.get("content", ""),
                 blob,
                 float(salience) if salience is not None else 1.0,
-                now,
+                float(ca) if ca else now,
                 now,
             ))
         # RETURNING preserves input order on SQLite >= 3.35 and avoids the
@@ -2209,6 +2212,9 @@ class Mazemaker:
                 "content": text,
                 "embedding": emb,
                 "salience": (r.get("metadata") or {}).get("salience"),
+                # Optional per-row EVENT time (epoch seconds) for imports/
+                # backfills — see PostgresStore.store(created_at=...).
+                "created_at": r.get("created_at"),
             })
 
         ids = self.store.remember_batch(store_rows)

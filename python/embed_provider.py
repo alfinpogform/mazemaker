@@ -41,7 +41,10 @@ warnings.filterwarnings(
 )
 
 CACHE_DIR = Path.home() / ".mazemaker" / "engine"
-CACHE_FILE = CACHE_DIR / "embed_cache.pkl"
+CACHE_FILE = CACHE_DIR / "embed_cache.json"
+# Legacy pickle cache (pre-2026-07-15). NEVER loaded — pickle.load on an
+# operator-writable file is code execution (audit finding ④). Only unlinked.
+_LEGACY_PICKLE_CACHE = CACHE_DIR / "embed_cache.pkl"
 MODEL_DIR = CACHE_DIR / "models"
 SOCKET_PATH = Path(os.environ.get('EMBED_SOCKET', str(CACHE_DIR / "embed.sock")))
 DIMENSION = 1024  # BAAI/bge-m3 output dim
@@ -1553,29 +1556,43 @@ class EmbeddingProvider:
     
     def _load_cache(self):
         from collections import OrderedDict
+        # Retire any legacy pickle cache WITHOUT loading it — pickle.load on an
+        # operator-writable file is arbitrary code execution (audit finding ④).
+        try:
+            if _LEGACY_PICKLE_CACHE.exists():
+                _LEGACY_PICKLE_CACHE.unlink()
+        except OSError:
+            pass
         if CACHE_FILE.exists():
             try:
-                with open(CACHE_FILE, 'rb') as f:
-                    raw = pickle.load(f)
-                if isinstance(raw, OrderedDict):
-                    self.cache = raw
-                elif isinstance(raw, dict):
-                    self.cache = OrderedDict(raw.items())
+                with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                    raw = json.load(f)
+                # Only accept the expected str -> list[float] shape; a JSON
+                # document can never smuggle code, so a bad file just yields
+                # an empty (cold) cache.
+                if isinstance(raw, dict):
+                    self.cache = OrderedDict(
+                        (k, v) for k, v in raw.items()
+                        if isinstance(k, str) and isinstance(v, list)
+                    )
                 else:
                     self.cache = OrderedDict()
             except Exception:
                 self.cache = OrderedDict()
             # On load, evict back down to the cap if a previous (unbounded)
-            # session left a giant pickle on disk.
+            # session left a giant cache on disk.
             self._evict_to_cap()
 
     def _save_cache(self):
-        """Persist cache atomically so a crash mid-write can't corrupt it."""
+        """Persist cache atomically so a crash mid-write can't corrupt it.
+
+        JSON (not pickle) so a compromised/hand-edited cache file can never
+        execute code on load (audit finding ④)."""
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         tmp = CACHE_FILE.with_name(CACHE_FILE.name + ".tmp")
         try:
-            with open(tmp, 'wb') as f:
-                pickle.dump(self.cache, f)
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, separators=(',', ':'))
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, CACHE_FILE)

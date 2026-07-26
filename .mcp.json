@@ -4,9 +4,9 @@
       "args": [
         "serve",
         "--db",
-        "/root/.perseus-vault/data/perseus-vault.db"
+        "~/.perseus-vault/data/perseus-vault.db"
       ],
-      "command": "/root/.local/bin/perseus-vault"
+      "command": "perseus-vault"
     }
   }
 }

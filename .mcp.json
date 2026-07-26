@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "perseus-vault": {
+      "args": [
+        "serve",
+        "--db",
+        "~/.perseus-vault/data/perseus-vault.db"
+      ],
+      "command": "perseus-vault"
+    }
+  }
+}

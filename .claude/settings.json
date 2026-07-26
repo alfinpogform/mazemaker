@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "perseus-vault maintain --db ~/.perseus-vault/data/perseus-vault.db",
+            "timeout": 120,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "perseus-vault prepare --task \"$(basename \"$PWD\")\" --db ~/.perseus-vault/data/perseus-vault.db",
+            "statusMessage": "Recalling from Perseus Vault...",
+            "timeout": 30,
+            "type": "command"
+          }
+        ],
+        "matcher": "startup|resume"
+      }
+    ]
+  }
+}

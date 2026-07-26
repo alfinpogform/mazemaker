@@ -17,3 +17,6 @@ PyJWT>=2.8.0           # JWT envelope decode + signature check
 # colbert@1.5 channel (Pro feature, opt-in):
 #   sentence-transformers
 #   torch
+#
+# perseus-vault plugin (plugins/perseus-vault, opt-in):
+#   mcp>=1.0.0

@@ -45,3 +45,5 @@ external/benchmarks/logs/
 # committed to this repo as of 2026-05-18.
 docs/PROPRIETARY_STACK_INTERNAL.md
 
+# Node dependencies
+node_modules/

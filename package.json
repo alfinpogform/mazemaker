@@ -1,0 +1,18 @@
+{
+  "name": "mazemaker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node-side dependencies for Mazemaker — an operating system for AI agents.",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alfinpogform/mazemaker.git"
+  },
+  "homepage": "https://github.com/alfinpogform/mazemaker#readme",
+  "bugs": {
+    "url": "https://github.com/alfinpogform/mazemaker/issues"
+  },
+  "dependencies": {
+    "supermemory": "^4.25.4"
+  }
+}

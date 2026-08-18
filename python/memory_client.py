@@ -182,6 +182,10 @@ class SQLiteStore:
         # "database is locked", which the architect dashboard renders
         # as a generic Internal-error tile.
         self.conn.execute("PRAGMA busy_timeout=30000")
+        # touch() decays salience with this constant. Mazemaker overwrites it
+        # with its configured salience_decay_k; a bare SQLiteStore (tests,
+        # tools, install.sh's DB bootstrap) needs the same default it uses.
+        self._salience_decay_k = 0.03
         self.conn.executescript(SCHEMA)
         self._ensure_schema_extensions()
         self._fts_available = self._ensure_fts()
@@ -1361,6 +1365,11 @@ class Mazemaker:
         self._reranker_failed = False
         self._rrf_k = int(rrf_k or 60)
         self._salience_decay_k = float(salience_decay_k or 0.03)
+        # touch() lives on the store and reads _salience_decay_k off it, so
+        # the configured knob has to be handed down; stores that do not decay
+        # salience (Postgres) simply never define the attribute.
+        if hasattr(self.store, "_salience_decay_k"):
+            self.store._salience_decay_k = self._salience_decay_k
         self._ppr_alpha = float(ppr_alpha or 0.15)
         self._ppr_iters = int(ppr_iters or 20)
         self._ppr_hops = int(ppr_hops or 2)

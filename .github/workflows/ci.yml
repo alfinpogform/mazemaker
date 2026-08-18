@@ -22,6 +22,16 @@ jobs:
       - name: Run tests
         run: python python/test_suite.py --tags embed,memory,api,storage,threading
 
+  test-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax-check shell scripts
+        run: |
+          for f in $(git ls-files '*.sh'); do bash -n "$f"; done
+      - name: Bootstrap installer tests
+        run: bash tests/test_bootstrap.sh
+
   test-cpp:
     runs-on: ubuntu-latest
     steps:

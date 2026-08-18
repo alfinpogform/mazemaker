@@ -13,10 +13,11 @@ file-structure map for when you need to know where a thing lives.
 
 1. [The 10-second smoke](#the-10-second-smoke)
 2. [Full Python test suite](#full-python-test-suite)
-3. [Clean Smoke Test](#clean-smoke-test)
-4. [Verified clean VM — Debian 12](#verified-clean-vm--debian-12)
-5. [VM / constrained-environment notes](#vm--constrained-environment-notes)
-6. [File structure](#file-structure)
+3. [Bootstrap installer tests](#bootstrap-installer-tests)
+4. [Clean Smoke Test](#clean-smoke-test)
+5. [Verified clean VM — Debian 12](#verified-clean-vm--debian-12)
+6. [VM / constrained-environment notes](#vm--constrained-environment-notes)
+7. [File structure](#file-structure)
 
 ---
 
@@ -67,6 +68,30 @@ cd build && ctest
 ```
 
 The `.so` is optional — Python falls back gracefully when it's absent.
+
+---
+
+## Bootstrap installer tests
+
+`scripts/bootstrap.sh` is what `https://api.mazemaker.dev/install.sh`
+serves. Its suite runs offline against a fixture repo in `$TMPDIR` and
+never executes the real `install.sh` — a stub stands in so the
+arguments it receives can be asserted on.
+
+```bash
+bash tests/test_bootstrap.sh
+```
+
+Covers: option parsing, the root guard, clone and update paths, the
+dirty-checkout and foreign-directory refusals, `--force`, argument
+pass-through (including paths containing spaces), and exit-status
+propagation when `install.sh` fails.
+
+Syntax-check every shell script in the repo the way CI does:
+
+```bash
+for f in $(git ls-files '*.sh'); do bash -n "$f"; done
+```
 
 ---
 
@@ -162,6 +187,7 @@ The gotchas from real installs on constrained hosts:
 ```
 mazemaker/
 ├── install.sh                    Installer
+├── scripts/bootstrap.sh          curl | bash bootstrap (api.mazemaker.dev/install.sh)
 ├── hermes-plugin/                Plugin (deployed to hermes-agent)
 │   ├── __init__.py               MemoryProvider + 4 tools
 │   ├── config.py                 Config loader

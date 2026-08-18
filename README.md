@@ -209,6 +209,43 @@ Commodity retrieval systems do not jump to 3-second p95s. Cognitive systems do.
 curl -fsSL https://api.mazemaker.dev/install.sh | bash
 ```
 
+The bootstrap script preflights the machine (OS, Python 3.9+, git, disk, RAM),
+clones the repo into `~/.mazemaker/src`, installs the runtime dependencies, then
+hands off to `install.sh`. It refuses to run as root and never touches anything
+outside `$HOME`. Source of truth: [`scripts/bootstrap.sh`](scripts/bootstrap.sh).
+
+Options go after `--`:
+
+```bash
+# Low-RAM box: hash embeddings, no model download
+curl -fsSL https://api.mazemaker.dev/install.sh | bash -s -- --hash-backend
+
+# Pin a ref, install somewhere else, fetch without installing
+curl -fsSL https://api.mazemaker.dev/install.sh | bash -s -- --ref v1.2.0 --dir ~/src/mazemaker
+curl -fsSL https://api.mazemaker.dev/install.sh | bash -s -- --fetch-only
+
+# Everything it accepts
+curl -fsSL https://api.mazemaker.dev/install.sh | bash -s -- --help
+```
+
+| Option | Effect |
+| ------ | ------ |
+| `--dir PATH` | Checkout location (default `~/.mazemaker/src`) |
+| `--ref REF` | Branch, tag or commit (default `master`) |
+| `--repo URL` | Alternate source repository |
+| `--hermes-agent PATH` | Explicit hermes-agent path instead of auto-detection |
+| `--hash-backend` | Hash embeddings — instant, no model download, low RAM |
+| `--with-mssql` | Also set up the MSSQL cold store |
+| `--skip-deps` | Leave `requirements.txt` alone |
+| `--fetch-only` | Fetch the source, skip `install.sh` |
+| `--force` | Overwrite a dirty or foreign checkout at `--dir` |
+
+Equivalent env vars: `MAZEMAKER_DIR`, `MAZEMAKER_REF`, `MAZEMAKER_REPO`,
+`MAZEMAKER_SKIP_DEPS=1`, `MAZEMAKER_ALLOW_ROOT=1`, `NO_COLOR`.
+
+Re-running the same command updates in place. To remove it:
+`bash ~/.mazemaker/src/install.sh uninstall`.
+
 Includes Postgres + pgvector, ColBERT rerank, dream worker, Architect UI, synthesis pipeline, and autonomous consolidation.
 
 **Community Version stays free for forever.** No credit card. No quota gate. No trial countdown.

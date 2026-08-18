@@ -150,6 +150,21 @@ detect_pip() {
 }
 
 # -------------------------------------------------------------------
+# Detect total RAM in MB
+# -------------------------------------------------------------------
+# Prints nothing when the platform exposes neither source. The previous
+# one-liner read /proc/meminfo unconditionally and fell back to 0, so on
+# macOS — no /proc — every install looked like a 0GB machine and silently
+# forced --hash-backend onto hosts with plenty of memory.
+detect_ram_mb() {
+    if [ -r /proc/meminfo ]; then
+        awk '/MemTotal/ {printf "%d", $2/1024; exit}' /proc/meminfo
+    elif command -v sysctl &>/dev/null; then
+        sysctl -n hw.memsize 2>/dev/null | awk '$1 ~ /^[0-9]+$/ {printf "%d", $1/1048576}'
+    fi
+}
+
+# -------------------------------------------------------------------
 # Create symlinks for a target directory
 # -------------------------------------------------------------------
 create_symlinks() {
@@ -293,13 +308,20 @@ cmd_install() {
     # -------------------------------------------------------------------
     # System checks
     # -------------------------------------------------------------------
-    TOTAL_RAM_MB=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)
-    TOTAL_RAM_GB=$(awk '/MemTotal/ {printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null || echo "0")
-    print_ok "RAM: ${TOTAL_RAM_GB}GB"
+    TOTAL_RAM_MB=$(detect_ram_mb 2>/dev/null || true)
 
-    if [ "$TOTAL_RAM_MB" -lt 3072 ]; then
-        print_warn "Less than 3GB RAM — auto-selecting --hash-backend"
-        HASH_BACKEND=true
+    if [ -n "$TOTAL_RAM_MB" ] && [ "$TOTAL_RAM_MB" -gt 0 ]; then
+        TOTAL_RAM_GB=$(awk -v mb="$TOTAL_RAM_MB" 'BEGIN {printf "%.1f", mb/1024}')
+        print_ok "RAM: ${TOTAL_RAM_GB}GB"
+
+        if [ "$TOTAL_RAM_MB" -lt 3072 ]; then
+            print_warn "Less than 3GB RAM — auto-selecting --hash-backend"
+            HASH_BACKEND=true
+        fi
+    else
+        # Unknown is not the same as small: downgrading the backend here
+        # would cost FastEmbed quality on a machine that can afford it.
+        print_warn "RAM: could not determine — keeping the chosen backend (pass --hash-backend on a small machine)"
     fi
 
     # -------------------------------------------------------------------

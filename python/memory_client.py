@@ -166,9 +166,10 @@ END;
 
 
 class SQLiteStore:
-    def __init__(self, db_path: str | Path = DB_PATH):
+    def __init__(self, db_path: str | Path = DB_PATH, salience_decay_k: float = 0.03):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._db_path = str(db_path)
+        self._salience_decay_k = float(salience_decay_k)
         self.conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
@@ -1341,7 +1342,7 @@ class Mazemaker:
                     "backend is a Pro feature; falling back to SQLite. "
                     "See https://mazemaker.online/#pricing"
                 )
-            self.store = SQLiteStore(db_path)
+            self.store = SQLiteStore(db_path, salience_decay_k=salience_decay_k)
 
         self.dim = self.embedder.dim
         self._db_path = Path(db_path)

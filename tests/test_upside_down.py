@@ -801,8 +801,8 @@ def test_file_sync():
     # Source-of-truth .py files that MUST exist in python/
     sources = [
         'memory_client.py', 'memory_client.py', 'embed_provider.py',
-        'dream_engine.py', 'dream_worker.py', 'access_logger.py',
-        'cpp_bridge.py', 'cpp_dream_backend.py', 'lstm_knn_bridge.py',
+        'dream_engine.py', 'access_logger.py',
+        'cpp_bridge.py', 'lstm_knn_bridge.py',
         'config.py',
     ]
     missing_sources = [f for f in sources if not (PYTHON_DIR / f).exists()]

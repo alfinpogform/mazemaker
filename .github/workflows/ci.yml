@@ -18,9 +18,17 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install sentence-transformers numpy
-      - name: Run tests
-        run: python python/test_suite.py --tags embed,memory,api,storage,threading
+        run: pip install sentence-transformers numpy cryptography PyJWT pyyaml
+      - name: Run tagged test suite (python/test_suite.py)
+        run: python python/test_suite.py --tags embed,memory,api,storage,threading,cpp,stress,perf,slow
+      - name: Run upside-down edge-case suite (tests/test_upside_down.py)
+        run: python tests/test_upside_down.py
+      - name: Run fast integration suite (python/test_integration.py)
+        run: python python/test_integration.py
+      - name: Run skynet feature regression suite (python/test_skynet_features.py)
+        run: python python/test_skynet_features.py
+      - name: Run license unit tests (python/test_license.py)
+        run: python python/test_license.py
 
   test-cpp:
     runs-on: ubuntu-latest

@@ -29,6 +29,8 @@ jobs:
         run: python python/test_skynet_features.py
       - name: Run license unit tests (python/test_license.py)
         run: python python/test_license.py
+      - name: Run paper library tests (python/test_paper_library.py)
+        run: python python/test_paper_library.py
 
   test-cpp:
     runs-on: ubuntu-latest

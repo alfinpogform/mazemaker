@@ -31,6 +31,8 @@ jobs:
         run: python python/test_license.py
       - name: Run paper library tests (python/test_paper_library.py)
         run: python python/test_paper_library.py
+      - name: Run paper import tests (python/test_import_papers.py)
+        run: python python/test_import_papers.py
 
   test-cpp:
     runs-on: ubuntu-latest

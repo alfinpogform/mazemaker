@@ -130,6 +130,109 @@ MAZEMAKER_GRAPH_SCHEMA = {
     "parameters": {"type": "object", "properties": {}, "required": []},
 }
 
+MAZEMAKER_PAPER_ADD_SCHEMA = {
+    "name": "mazemaker_paper_add",
+    "description": (
+        "STORE an AI paper or reference document in the paper library — a "
+        "storage space separate from ordinary memories, for arXiv papers, "
+        "PDFs, and articles the user wants to keep and search later. Call "
+        "this when the user shares a paper, asks you to save/file a paper, "
+        "or references one they want kept for later lookup. Re-adding the "
+        "same source_id (arXiv id, DOI, or URL) updates the existing entry "
+        "instead of duplicating it."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Paper title.",
+            },
+            "authors": {
+                "type": "string",
+                "description": "Author names, comma-separated.",
+            },
+            "abstract": {
+                "type": "string",
+                "description": "Paper abstract or a short summary.",
+            },
+            "source": {
+                "type": "string",
+                "description": "Where this came from: 'arxiv', 'url', 'file', or 'note'.",
+            },
+            "source_id": {
+                "type": "string",
+                "description": (
+                    "Stable external id for dedup — arXiv id (e.g. '1706.03762'), "
+                    "DOI, or canonical URL. Re-adding the same source_id updates "
+                    "the entry in place."
+                ),
+            },
+            "url": {
+                "type": "string",
+                "description": "Link to the paper.",
+            },
+            "tags": {
+                "type": "string",
+                "description": "Topic tags, comma-separated (e.g. 'nlp, transformers').",
+            },
+        },
+        "required": ["title"],
+    },
+}
+
+MAZEMAKER_PAPER_SEARCH_SCHEMA = {
+    "name": "mazemaker_paper_search",
+    "description": (
+        "SEARCH the paper library by topic — semantic + keyword hybrid "
+        "search over titles/abstracts/full text. Call when the user asks "
+        "to find a paper they saved, or wants papers on a topic. Distinct "
+        "from mazemaker_recall, which searches ordinary memories, not the "
+        "paper library."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search phrase — topic, method name, or title fragment.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max results to return (default: 10).",
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+MAZEMAKER_PAPER_LIST_SCHEMA = {
+    "name": "mazemaker_paper_list",
+    "description": (
+        "BROWSE the paper library, optionally filtered by tag or source. "
+        "Call when the user asks 'what papers do I have on X?' or wants an "
+        "overview of their saved papers, rather than a topic search."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "tag": {
+                "type": "string",
+                "description": "Filter to papers whose tags include this substring.",
+            },
+            "source": {
+                "type": "string",
+                "description": "Filter to one source: 'arxiv', 'url', 'file', or 'note'.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max results to return (default: 50).",
+            },
+        },
+        "required": [],
+    },
+}
+
 MAZEMAKER_RECALL_MULTI_SCHEMA = {
     "name": "mazemaker_recall_multi",
     "description": (
@@ -595,6 +698,9 @@ ALL_TOOL_SCHEMAS = [
     MAZEMAKER_CONNECTIONS_IMPORT_SCHEMA,
     MAZEMAKER_THINK_SCHEMA,
     MAZEMAKER_GRAPH_SCHEMA,
+    MAZEMAKER_PAPER_ADD_SCHEMA,
+    MAZEMAKER_PAPER_SEARCH_SCHEMA,
+    MAZEMAKER_PAPER_LIST_SCHEMA,
     *_DREAM_PHASE_SCHEMAS,
 ]
 
@@ -608,9 +714,11 @@ ALL_TOOL_SCHEMAS = [
 #
 # Default is ENABLED: a tool is disabled only when its env var is explicitly one
 # of "0"/"false"/"no"/"off". Tools with no entry here are ALWAYS enabled — the
-# license-client only emits the 13 toggles below, so operator/admin tools
-# (get, afe_facts, synth_lineage, diagnose, rebake, ablate, supersedes_log,
-# connections_import) deliberately have no gate.
+# license-client only emits a subset of the toggles below (new tools may be
+# added here ahead of the license-client learning about them; they simply
+# default enabled until it does), so operator/admin tools (get, afe_facts,
+# synth_lineage, diagnose, rebake, ablate, supersedes_log, connections_import)
+# deliberately have no gate at all.
 TOOL_ENV_TOGGLE: dict[str, str] = {
     "mazemaker_remember":         "MM_TOOL_REMEMBER_ENABLED",
     "neural_remember":            "MM_TOOL_REMEMBER_ENABLED",
@@ -623,6 +731,9 @@ TOOL_ENV_TOGGLE: dict[str, str] = {
     "mazemaker_browse":           "MM_TOOL_BROWSE_ENABLED",
     "mazemaker_graph":            "MM_TOOL_GRAPH_ENABLED",
     "neural_graph":               "MM_TOOL_GRAPH_ENABLED",
+    "mazemaker_paper_add":        "MM_TOOL_PAPER_ENABLED",
+    "mazemaker_paper_search":     "MM_TOOL_PAPER_ENABLED",
+    "mazemaker_paper_list":       "MM_TOOL_PAPER_ENABLED",
     "mazemaker_stats":            "MM_TOOL_STATS_ENABLED",
     "neural_stats":               "MM_TOOL_STATS_ENABLED",
     "mazemaker_prune":            "MM_TOOL_PRUNE_ENABLED",

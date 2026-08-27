@@ -23,6 +23,7 @@ import argparse
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -30,15 +31,29 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-ARXIV_ID_RE = re.compile(r"\b(\d{4}\.\d{4,5})(?:v\d+)?\b")
+ARXIV_ID_RE = re.compile(r"(\d{4}\.\d{4,5})(?:v\d+)?")
+ARXIV_BARE_ID_RE = re.compile(r"(\d{4}\.\d{4,5})(?:v\d+)?$")
 ARXIV_API = "http://export.arxiv.org/api/query?id_list={id}"
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 
 def extract_arxiv_id(ref: str) -> Optional[str]:
-    """Pull a bare arXiv id (e.g. '1706.03762') out of an id or arxiv.org URL."""
-    m = ARXIV_ID_RE.search(ref)
-    return m.group(1) if m else None
+    """Pull a bare arXiv id (e.g. '1706.03762') out of a bare id or an
+    arxiv.org URL. Deliberately does NOT match a YYYY.NNNNN-shaped number
+    appearing anywhere in an arbitrary non-arxiv.org URL — that would force
+    a live arXiv fetch (and can fail outright) for references that were
+    never arXiv papers to begin with.
+    """
+    ref = ref.strip()
+    m = ARXIV_BARE_ID_RE.match(ref)
+    if m:
+        return m.group(1)
+    host = urllib.parse.urlparse(ref).netloc.lower()
+    if host == "arxiv.org" or host.endswith(".arxiv.org"):
+        m = ARXIV_ID_RE.search(ref)
+        if m:
+            return m.group(1)
+    return None
 
 
 def parse_arxiv_entry(xml_bytes: bytes, arxiv_id: str) -> dict:
@@ -156,7 +171,7 @@ def main():
 
     try:
         fields = ingest(args.ref, title=args.title, tags=args.tags, source=args.source)
-    except (ValueError, urllib.error.URLError) as e:
+    except (ValueError, urllib.error.URLError, ET.ParseError) as e:
         print(f"Import failed: {e}", file=sys.stderr)
         sys.exit(1)
 

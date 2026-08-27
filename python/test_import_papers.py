@@ -81,6 +81,24 @@ def t4():
     assert extract_arxiv_id("not a paper reference at all") is None
 
 
+@_testcase("extract_arxiv_id: YYYY.NNNNN-shaped substring in a non-arxiv URL doesn't false-positive")
+def t4b():
+    from import_papers import extract_arxiv_id
+    assert extract_arxiv_id("https://blog.example.com/posts/2024.11234-review") is None
+
+
+@_testcase("ingest: non-arxiv URL with a YYYY.NNNNN-shaped path segment needs no network fetch")
+def t4c():
+    from import_papers import ingest
+    # Regression: this used to be mis-detected as an arXiv id and forced a
+    # live fetch_arxiv_metadata() call even though --title makes that
+    # unnecessary — this must resolve purely locally.
+    fields = ingest("https://blog.example.com/posts/2024.11234-review", title="My Favorite Post")
+    assert fields["title"] == "My Favorite Post"
+    assert fields["source"] == "url"
+    assert fields["source_id"] == "https://blog.example.com/posts/2024.11234-review"
+
+
 @_testcase("parse_arxiv_entry: extracts title/abstract/authors, collapses whitespace")
 def t5():
     from import_papers import parse_arxiv_entry
@@ -160,7 +178,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print("  Paper Import Tests")
     print("=" * 60)
-    for t in [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11]:
+    for t in [t1, t2, t3, t4, t4b, t4c, t5, t6, t7, t8, t9, t10, t11]:
         t()
     print("=" * 60)
     print(f"  {PASS} passed, {FAIL} failed")

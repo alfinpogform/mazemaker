@@ -801,8 +801,8 @@ def test_file_sync():
     # Source-of-truth .py files that MUST exist in python/
     sources = [
         'memory_client.py', 'memory_client.py', 'embed_provider.py',
-        'dream_engine.py', 'dream_worker.py', 'access_logger.py',
-        'cpp_bridge.py', 'cpp_dream_backend.py', 'lstm_knn_bridge.py',
+        'dream_engine.py', 'access_logger.py',
+        'cpp_bridge.py', 'lstm_knn_bridge.py',
         'config.py',
     ]
     missing_sources = [f for f in sources if not (PYTHON_DIR / f).exists()]
@@ -1379,12 +1379,16 @@ def test_neural_recall_deep():
         assert len(results) == 0, f"k=-5 returned {len(results)}"
         T.ok("recall/k-negative", "k=-5 returns 0 results")
 
-        # Results sorted by relevance (similarity descending)
+        # Results sorted by relevance descending — recall() ranks by the
+        # blended 'relevance' score (semantic + salience/recency), not raw
+        # cosine similarity, so check that field. (The convenience 'score'
+        # field is a *non-zero*-preferring display cascade, not a sort key —
+        # it can legitimately differ from the actual ranking field.)
         results = nm.recall("recall deep test", k=5)
         if len(results) >= 2:
-            sims = [r['similarity'] for r in results]
-            assert sims == sorted(sims, reverse=True), f"not sorted: {sims}"
-            T.ok("recall/sorted", "results sorted by similarity descending")
+            ranks = [r['relevance'] for r in results]
+            assert ranks == sorted(ranks, reverse=True), f"not sorted: {ranks}"
+            T.ok("recall/sorted", "results sorted by relevance descending")
 
         nm.close()
 

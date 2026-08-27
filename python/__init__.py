@@ -47,6 +47,8 @@ from mcp_schemas import (  # noqa: F401
     MAZEMAKER_ABLATE_SCHEMA, MAZEMAKER_HEALTH_SCHEMA,
     MAZEMAKER_SUPERSEDES_LOG_SCHEMA,
     MAZEMAKER_THINK_SCHEMA, MAZEMAKER_GRAPH_SCHEMA,
+    MAZEMAKER_PAPER_ADD_SCHEMA, MAZEMAKER_PAPER_SEARCH_SCHEMA,
+    MAZEMAKER_PAPER_LIST_SCHEMA,
     ALL_TOOL_SCHEMAS, DREAM_PHASE_TOOL_ALIAS,
 )
 
@@ -60,6 +62,7 @@ class NeuralMemoryProvider(MemoryProvider):
 
     def __init__(self):
         self._memory: Optional[Any] = None  # Mazemaker instance
+        self._papers: Optional[Any] = None  # PaperLibrary instance — lazy, built on first use
         self._config: Optional[dict] = None
         self._session_id: str = ""
         self._lock = threading.Lock()
@@ -908,6 +911,12 @@ memory?") call `neural_graph` to summarise.
             return self._handle_think(args)
         elif tool_name == "mazemaker_graph":
             return self._handle_graph(args)
+        elif tool_name == "mazemaker_paper_add":
+            return self._handle_paper_add(args)
+        elif tool_name == "mazemaker_paper_search":
+            return self._handle_paper_search(args)
+        elif tool_name == "mazemaker_paper_list":
+            return self._handle_paper_list(args)
         elif tool_name in DREAM_PHASE_TOOL_ALIAS:
             return self._handle_dream_phase(DREAM_PHASE_TOOL_ALIAS[tool_name])
         elif tool_name == "mazemaker_dream_config":
@@ -1253,6 +1262,12 @@ memory?") call `neural_graph` to summarise.
             except Exception:
                 pass
             self._memory = None
+        if self._papers:
+            try:
+                self._papers.close()
+            except Exception:
+                pass
+            self._papers = None
 
     # -- Tool handlers -------------------------------------------------------
 
@@ -1463,6 +1478,57 @@ memory?") call `neural_graph` to summarise.
             graph = self._memory.graph()
             stats = self._memory.stats()
             return json.dumps({"graph": graph, "stats": stats})
+        except Exception as exc:
+            return tool_error(str(exc))
+
+    def _get_papers(self):
+        """Lazily construct the paper library. Independent of self._memory —
+        the paper store lives in its own namespace and works even if the
+        general memory engine failed to initialize."""
+        if self._papers is None:
+            from paper_library import PaperLibrary
+            embedding_backend = (self._config or {}).get("embedding_backend", "auto")
+            self._papers = PaperLibrary(embedding_backend=embedding_backend)
+        return self._papers
+
+    def _handle_paper_add(self, args: dict) -> str:
+        try:
+            title = args.get("title")
+            if not isinstance(title, str) or not title.strip():
+                return tool_error("title must be a non-empty string")
+            pid = self._get_papers().add(
+                title=title,
+                authors=args.get("authors"),
+                abstract=args.get("abstract"),
+                source=args.get("source"),
+                source_id=args.get("source_id"),
+                url=args.get("url"),
+                tags=args.get("tags"),
+            )
+            return json.dumps({"id": pid, "status": "stored"})
+        except Exception as exc:
+            return tool_error(str(exc))
+
+    def _handle_paper_search(self, args: dict) -> str:
+        try:
+            query = args.get("query")
+            if not isinstance(query, str) or not query.strip():
+                return tool_error("query must be a non-empty string")
+            limit = self._coerce_int(args.get("limit"), 10)
+            limit = max(1, min(limit, 50))
+            results = self._get_papers().search(query, k=limit)
+            return json.dumps({"results": results, "count": len(results)})
+        except Exception as exc:
+            return tool_error(str(exc))
+
+    def _handle_paper_list(self, args: dict) -> str:
+        try:
+            limit = self._coerce_int(args.get("limit"), 50)
+            limit = max(1, min(limit, 200))
+            results = self._get_papers().list(
+                tag=args.get("tag"), source=args.get("source"), limit=limit,
+            )
+            return json.dumps({"results": results, "count": len(results)})
         except Exception as exc:
             return tool_error(str(exc))
 

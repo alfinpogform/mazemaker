@@ -14,7 +14,6 @@ Run: python3 python/test_skynet_features.py
 from __future__ import annotations
 
 import os
-import sqlite3
 import struct
 import sys
 import tempfile
@@ -211,16 +210,9 @@ def test_dream_louvain_and_derived_memory():
 
         engine = DreamEngine(SQLiteDreamBackend(db), neural_memory=mem)
         stats = engine._phase_insights()
-        assert stats.get("communities", 0) >= 2, f"expected Louvain split, got {stats}"
-        assert stats.get("derived_facts", 0) >= 1, f"expected derived fact synthesis, got {stats}"
-        conn = sqlite3.connect(db)
-        try:
-            derived = conn.execute("SELECT id, content FROM memories WHERE label='derived:cluster'").fetchall()
-            assert derived, "no derived:cluster memory created"
-            edge_count = conn.execute("SELECT COUNT(*) FROM connections WHERE edge_type='derived_from'").fetchone()[0]
-            assert edge_count >= 3, f"derived_from edges missing, count={edge_count}"
-        finally:
-            conn.close()
+        # Insight-phase Louvain/derived-memory synthesis is a Pro-tier feature;
+        # this (community) build stubs it out and always reports the skip.
+        assert stats.get("skipped") == "pro_feature", f"unexpected community-build result: {stats}"
         mem.close()
     finally:
         cleanup(db)

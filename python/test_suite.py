@@ -421,9 +421,9 @@ def test_29():
 def test_30():
     try:
         from cpp_bridge import MazemakerCpp
+        m = MazemakerCpp()
     except FileNotFoundError:
         raise SkipTest("C++ library not found")
-    m = MazemakerCpp()
     assert m is not None
 
 # ============================================================================

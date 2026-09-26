@@ -1486,9 +1486,15 @@ memory?") call `neural_graph` to summarise.
         the paper store lives in its own namespace and works even if the
         general memory engine failed to initialize."""
         if self._papers is None:
-            from paper_library import PaperLibrary
-            embedding_backend = (self._config or {}).get("embedding_backend", "auto")
-            self._papers = PaperLibrary(embedding_backend=embedding_backend)
+            with self._lock:
+                # Re-check inside the lock: another thread may have already
+                # built it while this one was waiting — without the guard,
+                # two concurrent tool calls can each construct their own
+                # PaperLibrary/sqlite connection and leak the loser's.
+                if self._papers is None:
+                    from paper_library import PaperLibrary
+                    embedding_backend = (self._config or {}).get("embedding_backend", "auto")
+                    self._papers = PaperLibrary(embedding_backend=embedding_backend)
         return self._papers
 
     def _handle_paper_add(self, args: dict) -> str:
